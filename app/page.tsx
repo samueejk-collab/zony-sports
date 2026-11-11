@@ -1,9 +1,12 @@
+'use client'
+
+import { useEffect } from "react"
 import Image from "next/image"
 import Link from "next/link"
 import { ArrowRight, PackageCheck, ShieldCheck, Truck } from "lucide-react"
 import { ProductCard } from "@/components/product-card"
-import { getDestacados } from "@/lib/products"
 import { CATEGORIAS, SITE } from "@/lib/site"
+import { useProducto } from "@/hooks/useProducto"
 
 const categoriaImagenes: Record<string, string> = {
   camperas: "/products/campera-pro.png",
@@ -13,7 +16,14 @@ const categoriaImagenes: Record<string, string> = {
 }
 
 export default function HomePage() {
-  const destacados = getDestacados(4)
+  const { prods, loading, error } = useProducto()
+
+  useEffect(() => {
+    console.log(prods)
+  }, [prods])
+
+  // Tomamos los primeros 4 productos devueltos por el hook
+  const destacados = prods?.slice(0, 4) ?? []
 
   return (
     <>
@@ -34,9 +44,9 @@ export default function HomePage() {
           <span className="inline-flex items-center gap-2 rounded-full border border-brand/40 bg-brand/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-brand">
             Venta por mayor
           </span>
-          <h1 className="max-w-2xl font-display text-5xl leading-[0.95] tracking-wide md:text-7xl">
-            Indumentaria deportiva que rinde{" "}
-            <span className="text-brand">temporada tras temporada</span>
+          <h1 className="max-w-2xl font-display text-5xl italic leading-[0.95] tracking-wide md:text-7xl">
+            ZONY{" "}
+            <span className="text-brand">SPORTS</span>
           </h1>
           <p className="max-w-lg text-base text-white/70 md:text-lg">
             {SITE.nombre} — marca argentina. Talles del 2 al 6, catálogo rotativo y
@@ -133,11 +143,22 @@ export default function HomePage() {
               Ver todo <ArrowRight className="size-4" />
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-            {destacados.map((p) => (
-              <ProductCard key={p.id} producto={p} />
-            ))}
-          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-64 animate-pulse rounded-xl bg-muted" />
+              ))}
+            </div>
+          ) : error ? (
+            <p className="text-center text-sm text-red-500">Error al cargar los productos.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+              {destacados.map((p) => (
+                <ProductCard key={p.id} producto={p} />
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </>

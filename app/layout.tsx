@@ -1,28 +1,11 @@
 import { Analytics } from "@vercel/analytics/next"
 import type { Metadata, Viewport } from "next"
-import { Bebas_Neue, Montserrat, Roboto } from "next/font/google"
 import { CartProvider } from "@/lib/cart-context"
 import { SiteHeader } from "@/components/site-header"
 import { SiteFooter } from "@/components/site-footer"
 import { WhatsAppButton } from "@/components/whatsapp-button"
 import { SITE } from "@/lib/site"
 import "./globals.css"
-
-const bebas = Bebas_Neue({
-  weight: "400",
-  subsets: ["latin"],
-  variable: "--font-bebas",
-})
-const montserrat = Montserrat({
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-  variable: "--font-montserrat",
-})
-const roboto = Roboto({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-roboto",
-})
 
 export const metadata: Metadata = {
   title: {
@@ -53,9 +36,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className="light">
-      <body
-        className={`${bebas.variable} ${montserrat.variable} ${roboto.variable} font-sans antialiased`}
-      >
+      <body className="font-sans antialiased">
         <CartProvider>
           <div className="flex min-h-dvh flex-col">
             <SiteHeader />

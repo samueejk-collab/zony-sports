@@ -8,16 +8,16 @@ export interface StockPorTalle {
 }
 
 export interface Producto {
-  id: string
+  id: string | number
   nombre: string
   categoria: CategoriaSlug
   descripcion: string
-  tela: string
+  tela?: string
   imagenes: string[]
-  tallesDisponibles: StockPorTalle[]
+  tallesDisponibles?: StockPorTalle[]
   precioMayorista: number
-  unidadMinimaPorPedido: number
-  activo: boolean
+  unidadMinimaPorPedido?: number
+  activo?: boolean
 }
 
 export const PRODUCTOS: Producto[] = [
@@ -160,15 +160,15 @@ export const PRODUCTOS: Producto[] = [
 ]
 
 export function getProductos(): Producto[] {
-  return PRODUCTOS.filter((p) => p.activo)
+  return PRODUCTOS.filter((p) => p.activo !== false)
 }
 
 export function getProductosPorCategoria(categoria: CategoriaSlug): Producto[] {
   return getProductos().filter((p) => p.categoria === categoria)
 }
 
-export function getProducto(id: string): Producto | undefined {
-  return PRODUCTOS.find((p) => p.id === id && p.activo)
+export function getProducto(id: string | number): Producto | undefined {
+  return PRODUCTOS.find((p) => String(p.id) === String(id) && p.activo !== false)
 }
 
 export function getDestacados(cantidad = 4): Producto[] {
@@ -176,9 +176,11 @@ export function getDestacados(cantidad = 4): Producto[] {
 }
 
 export function stockTotal(producto: Producto): number {
-  return producto.tallesDisponibles.reduce((acc, t) => acc + t.stock, 0)
+  if (!producto?.tallesDisponibles || !Array.isArray(producto.tallesDisponibles)) return 0
+  return producto.tallesDisponibles.reduce((acc, t) => acc + (t.stock ?? 0), 0)
 }
 
 export function stockDeTalle(producto: Producto, talle: Talle): number {
+  if (!producto?.tallesDisponibles || !Array.isArray(producto.tallesDisponibles)) return 0
   return producto.tallesDisponibles.find((t) => t.talle === talle)?.stock ?? 0
 }

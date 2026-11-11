@@ -1,8 +1,21 @@
 import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { ProductCard } from "@/components/product-card"
-import { getProductosPorCategoria } from "@/lib/products"
 import { CATEGORIAS, type CategoriaSlug } from "@/lib/site"
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
+
+async function obtenerProductosDesdeBackend() {
+  try {
+    const respuesta = await fetch(`${API_URL}/api/productos`, { cache: "no-store" })
+    if (!respuesta.ok) return []
+    const data = await respuesta.json()
+    // Soporta tanto si devuelve un array directo como un objeto Page de Spring Boot (.content)
+    return Array.isArray(data) ? data : (data.content || [])
+  } catch {
+    return []
+  }
+}
 
 export function generateStaticParams() {
   return CATEGORIAS.map((c) => ({ slug: c.slug }))
@@ -31,7 +44,12 @@ export default async function CategoriaPage({
   if (!categoriaValida(slug)) notFound()
 
   const categoria = CATEGORIAS.find((c) => c.slug === slug)!
-  const productos = getProductosPorCategoria(slug)
+
+  // Obtenemos todos los productos del backend y filtramos por la categoría actual
+  const todosLosProductos = await obtenerProductosDesdeBackend()
+  const productos = todosLosProductos.filter(
+    (p: any) => p.categoria === slug || p.categoria?.slug === slug
+  )
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-12 md:px-6">
@@ -53,7 +71,7 @@ export default async function CategoriaPage({
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {productos.map((p) => (
+          {productos.map((p: any) => (
             <ProductCard key={p.id} producto={p} />
           ))}
         </div>

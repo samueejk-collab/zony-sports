@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { getProducto, stockDeTalle, type Talle } from "@/lib/products"
 
 interface ItemEntrada {
   producto_id?: unknown
@@ -7,7 +6,7 @@ interface ItemEntrada {
   cantidad?: unknown
 }
 
-const TALLES_VALIDOS: Talle[] = ["2", "4", "6"]
+const TALLES_VALIDOS = ["2", "4", "6"]
 
 export async function POST(request: Request) {
   let body: { items?: unknown; cliente?: { nombre?: unknown; telefono?: unknown } }
@@ -21,17 +20,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "El pedido no tiene items." }, { status: 400 })
   }
 
-  // Recalcular precios y validar stock SIEMPRE del lado del servidor.
-  // El frontend nunca es fuente de verdad para precios ni stock.
   const itemsMP: { title: string; quantity: number; unit_price: number; currency_id: string }[] = []
   let total = 0
 
   for (const raw of body.items as ItemEntrada[]) {
-    const productoId = typeof raw.producto_id === "string" ? raw.producto_id : ""
+    const productoId = raw.producto_id
     const talle = raw.talle
     const cantidad = raw.cantidad
 
-    if (!TALLES_VALIDOS.includes(talle as Talle)) {
+    if (!TALLES_VALIDOS.includes(talle as string)) {
       return NextResponse.json({ error: `Talle inválido en el pedido.` }, { status: 400 })
     }
     if (
@@ -43,43 +40,51 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cantidad inválida en el pedido." }, { status: 400 })
     }
 
-    const producto = getProducto(productoId)
-    if (!producto) {
-      return NextResponse.json(
-        { error: "Uno de los productos no existe o no está disponible." },
-        { status: 400 },
-      )
-    }
+    try {
+      // Consultamos directamente al backend de Spring Boot para obtener los datos reales de la BD
+      const resBackend = await fetch(`http://localhost:8080/api/productos/${productoId}`, {
+        cache: "no-store",
+      })
 
-    const stock = stockDeTalle(producto, talle as Talle)
-    if (cantidad > stock) {
-      return NextResponse.json(
-        { error: `Stock insuficiente para ${producto.nombre} talle ${talle as string}.` },
-        { status: 409 },
-      )
-    }
-    if (cantidad < producto.unidadMinimaPorPedido) {
-      return NextResponse.json(
-        {
-          error: `${producto.nombre} requiere un mínimo de ${producto.unidadMinimaPorPedido} unidades.`,
-        },
-        { status: 400 },
-      )
-    }
+      if (!resBackend.ok) {
+        return NextResponse.json(
+          { error: "Uno de los productos no existe o no está disponible." },
+          { status: 400 },
+        )
+      }
 
-    total += cantidad * producto.precioMayorista
-    itemsMP.push({
-      title: `${producto.nombre} (Talle ${talle as string})`,
-      quantity: cantidad,
-      unit_price: producto.precioMayorista,
-      currency_id: "ARS",
-    })
+      const producto = await resBackend.json()
+
+      // Validaciones de precio y mínimos (ajustá las propiedades según lo que devuelva tu Spring Boot)
+      const precio = producto.precio ?? producto.precioMayorista ?? 0
+      const minUnidades = producto.unidadMinimaPorPedido ?? 1
+
+      if (cantidad < minUnidades) {
+        return NextResponse.json(
+          {
+            error: `${producto.nombre} requiere un mínimo de ${minUnidades} unidades.`,
+          },
+          { status: 400 },
+        )
+      }
+
+      total += cantidad * precio
+      itemsMP.push({
+        title: `${producto.nombre} (Talle ${talle as string})`,
+        quantity: cantidad,
+        unit_price: precio,
+        currency_id: "ARS",
+      })
+    } catch {
+      return NextResponse.json(
+        { error: "No se pudo validar el producto con el servidor de base de datos." },
+        { status: 502 },
+      )
+    }
   }
 
   const accessToken = process.env.MERCADOPAGO_ACCESS_TOKEN
   if (!accessToken) {
-    // Sin credenciales de Mercado Pago no se puede crear el pago online.
-    // El checkout por WhatsApp sigue funcionando como alternativa.
     return NextResponse.json(
       {
         error:
@@ -91,7 +96,6 @@ export async function POST(request: Request) {
     )
   }
 
-  // Con credenciales presentes se crea la preferencia contra la API de Mercado Pago.
   const origin = new URL(request.url).origin
   try {
     const mpRes = await fetch("https://api.mercadopago.com/checkout/preferences", {

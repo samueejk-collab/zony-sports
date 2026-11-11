@@ -15,6 +15,12 @@ export function ProductCard({ producto }: { producto: Producto }) {
   const total = stockTotal(producto)
   const estado = estadoDeStock(total)
 
+  // Imagen segura por si el producto no trae el array o viene vacío
+  const imagenSrc = producto.imagenes?.[0] || "/placeholder.svg"
+  
+  // Mínimo por pedido seguro (si no viene, por defecto muestra 1)
+  const minUnidades = producto.unidadMinimaPorPedido ?? 1
+
   return (
     <Link
       href={`/producto/${producto.id}`}
@@ -22,8 +28,8 @@ export function ProductCard({ producto }: { producto: Producto }) {
     >
       <div className="relative aspect-square overflow-hidden bg-neutral-100">
         <Image
-          src={producto.imagenes[0] || "/placeholder.svg"}
-          alt={producto.nombre}
+          src={imagenSrc}
+          alt={producto.nombre || "Producto Zony Sports"}
           fill
           sizes="(max-width: 768px) 50vw, 25vw"
           className="object-cover transition-transform duration-300 group-hover:scale-105"
@@ -41,7 +47,7 @@ export function ProductCard({ producto }: { producto: Producto }) {
         <h3 className="font-heading text-base font-bold leading-tight text-foreground">
           {producto.nombre}
         </h3>
-        <p className="text-xs text-muted-foreground">{producto.tela}</p>
+        <p className="text-xs text-muted-foreground">{producto.descripcion || "Indumentaria deportiva"}</p>
         <div className="mt-auto flex items-end justify-between pt-3">
           <div>
             <p className="text-xs text-muted-foreground">Precio mayorista</p>
@@ -50,7 +56,7 @@ export function ProductCard({ producto }: { producto: Producto }) {
             </p>
           </div>
           <span className="text-xs font-medium text-brand">
-            Mín. {producto.unidadMinimaPorPedido} u.
+            Mín. {minUnidades} u.
           </span>
         </div>
       </div>
