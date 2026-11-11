@@ -22,7 +22,6 @@ export default function HomePage() {
     console.log(prods)
   }, [prods])
 
-  // Tomamos los primeros 4 productos devueltos por el hook
   const destacados = prods?.slice(0, 4) ?? []
 
   return (

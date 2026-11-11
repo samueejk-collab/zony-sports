@@ -3,7 +3,7 @@ import Link from "next/link"
 import { formatoPrecio } from "@/lib/format"
 import { type Producto, stockTotal } from "@/lib/products"
 import { estadoDeStock, ETIQUETA_STOCK } from "@/lib/stock"
-import { cn } from "@/lib/utils"
+import { cn, obtenerImagenProducto } from "@/lib/utils"
 
 const badgeClases: Record<string, string> = {
   disponible: "bg-brand/15 text-brand",
@@ -15,10 +15,9 @@ export function ProductCard({ producto }: { producto: Producto }) {
   const total = stockTotal(producto)
   const estado = estadoDeStock(total)
 
-  // Imagen segura por si el producto no trae el array o viene vacío
-  const imagenSrc = producto.imagenes?.[0] || "/placeholder.svg"
+  // Forzamos que use la función basada en el nombre de la base de datos
+  const imagenSrc = obtenerImagenProducto(producto.nombre)
   
-  // Mínimo por pedido seguro (si no viene, por defecto muestra 1)
   const minUnidades = producto.unidadMinimaPorPedido ?? 1
 
   return (

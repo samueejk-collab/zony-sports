@@ -9,14 +9,28 @@ import { formatoPrecio } from "@/lib/format"
 import { mensajePedido, whatsappLink } from "@/lib/whatsapp"
 
 export function CartView() {
-  const { items, total, actualizarCantidad, quitar } = useCart()
+  const { items, actualizarCantidad, quitar } = useCart()
   const [nombre, setNombre] = useState("")
   const [telefono, setTelefono] = useState("")
   const [mpEstado, setMpEstado] = useState<"idle" | "cargando" | "error">("idle")
   const [mpMensaje, setMpMensaje] = useState<string | null>(null)
 
-  const itemsBajoMinimo = items.filter((i) => i.cantidad < i.unidadMinima)
+  // Validación robusta para evitar NaN
+  const obtenerCantidadSegura = (cant: any) => {
+    const num = Number(cant)
+    return Number.isNaN(num) || num < 1 ? 1 : num
+  }
+
+  const itemsBajoMinimo = items.filter((i) => {
+    const cant = obtenerCantidadSegura(i.cantidad)
+    return cant < (i.unidadMinima || 1)
+  })
   const cumpleMinimos = itemsBajoMinimo.length === 0
+
+  const totalSeguro = items.reduce((acc, i) => {
+    const cant = obtenerCantidadSegura(i.cantidad)
+    return acc + (cant * i.precioUnitario)
+  }, 0)
 
   async function pagarConMercadoPago() {
     setMpEstado("cargando")
@@ -29,7 +43,7 @@ export function CartView() {
           items: items.map((i) => ({
             producto_id: i.productoId,
             talle: i.talle,
-            cantidad: i.cantidad,
+            cantidad: obtenerCantidadSegura(i.cantidad),
           })),
           cliente: { nombre, telefono },
         }),
@@ -74,8 +88,10 @@ export function CartView() {
     <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
       <div className="space-y-4">
         {items.map((i) => {
-          const subtotal = i.cantidad * i.precioUnitario
-          const bajoMinimo = i.cantidad < i.unidadMinima
+          const cantidadValida = obtenerCantidadSegura(i.cantidad)
+          const subtotal = cantidadValida * i.precioUnitario
+          const bajoMinimo = cantidadValida < i.unidadMinima
+
           return (
             <div
               key={`${i.productoId}-${i.talle}`}
@@ -113,37 +129,48 @@ export function CartView() {
 
                 <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-3">
                   <div className="inline-flex items-center rounded-lg border border-border">
+                    {/* Botón Restar */}
                     <button
                       type="button"
-                      onClick={() => actualizarCantidad(i.productoId, i.talle, i.cantidad - 1)}
-                      disabled={i.cantidad <= 1}
-                      className="flex size-9 items-center justify-center rounded-l-lg transition-colors hover:bg-muted disabled:opacity-40"
+                      onClick={() => actualizarCantidad(i.productoId, i.talle, cantidadValida - 1)}
+                      disabled={cantidadValida <= 1}
+                      className="flex size-9 items-center justify-center rounded-l-lg transition-colors hover:bg-muted disabled:opacity-40 cursor-pointer"
                       aria-label="Restar una unidad"
                     >
                       <Minus className="size-4" />
                     </button>
+                    
+                    {/* Input manual */}
                     <input
                       type="number"
                       min={1}
                       max={i.stockDisponible}
-                      value={i.cantidad}
+                      value={cantidadValida}
                       onChange={(e) => {
-                        const n = Number.parseInt(e.target.value, 10)
+                        const val = e.target.value
+                        if (val === "") {
+                          actualizarCantidad(i.productoId, i.talle, 1)
+                          return
+                        }
+                        const n = Number.parseInt(val, 10)
                         if (!Number.isNaN(n)) actualizarCantidad(i.productoId, i.talle, n)
                       }}
                       className="h-9 w-14 border-x border-border bg-background text-center font-bold outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       aria-label={`Cantidad de ${i.nombre}`}
                     />
+
+                    {/* Botón Sumar */}
                     <button
                       type="button"
-                      onClick={() => actualizarCantidad(i.productoId, i.talle, i.cantidad + 1)}
-                      disabled={i.cantidad >= i.stockDisponible}
-                      className="flex size-9 items-center justify-center rounded-r-lg transition-colors hover:bg-muted disabled:opacity-40"
+                      onClick={() => actualizarCantidad(i.productoId, i.talle, cantidadValida + 1)}
+                      disabled={cantidadValida >= i.stockDisponible}
+                      className="flex size-9 items-center justify-center rounded-r-lg transition-colors hover:bg-muted disabled:opacity-40 cursor-pointer"
                       aria-label="Sumar una unidad"
                     >
                       <Plus className="size-4" />
                     </button>
                   </div>
+
                   <div className="text-right">
                     <p className="text-xs text-muted-foreground">
                       {formatoPrecio(i.precioUnitario)} c/u
@@ -197,7 +224,7 @@ export function CartView() {
           <div className="flex items-center justify-between border-t border-border pt-4">
             <span className="font-heading text-base font-bold uppercase">Total</span>
             <span className="font-heading text-2xl font-extrabold">
-              {formatoPrecio(total)}
+              {formatoPrecio(totalSeguro)}
             </span>
           </div>
 
@@ -225,7 +252,7 @@ export function CartView() {
               Pagar con Mercado Pago
             </button>
             <a
-              href={cumpleMinimos ? whatsappLink(mensajePedido(items, total)) : undefined}
+              href={cumpleMinimos ? whatsappLink(mensajePedido(items, totalSeguro)) : undefined}
               target="_blank"
               rel="noopener noreferrer"
               aria-disabled={!cumpleMinimos}

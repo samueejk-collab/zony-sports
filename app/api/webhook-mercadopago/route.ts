@@ -55,8 +55,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No se pudo verificar el pago." }, { status: 502 })
     }
     const pago = await pagoRes.json()
-    // Aquí se actualizaría el pedido (external_reference) y el stock según
-    // pago.status ("approved" | "rejected" | "cancelled") en la base de datos.
     console.log("[v0] Webhook MP verificado. Estado del pago:", pago.status)
     return NextResponse.json({ received: true }, { status: 200 })
   } catch {

@@ -11,7 +11,7 @@ import {
 import type { Producto, Talle } from "./products"
 
 export interface CartItem {
-  productoId: string
+  productoId: string | number
   nombre: string
   imagen: string
   talle: Talle
@@ -19,6 +19,7 @@ export interface CartItem {
   precioUnitario: number
   unidadMinima: number
   stockDisponible: number
+  [key: string]: any // Permite tolerar propiedades adicionales o viejas de localStorage
 }
 
 interface CartContextValue {
@@ -31,8 +32,8 @@ interface CartContextValue {
     cantidad: number,
     stockDisponible: number,
   ) => void
-  actualizarCantidad: (productoId: string, talle: Talle, cantidad: number) => void
-  quitar: (productoId: string, talle: Talle) => void
+  actualizarCantidad: (productoId: string | number, talle: Talle, cantidad: number) => void
+  quitar: (productoId: string | number, talle: Talle) => void
   vaciar: () => void
   isOpen: boolean
   setOpen: (open: boolean) => void
@@ -42,9 +43,9 @@ const STORAGE_KEY = "zony-cart-v1"
 
 const CartContext = createContext<CartContextValue | null>(null)
 
-function keyOf(productoId: string, talle: Talle) {
-  return `${productoId}__${talle}`
-}
+// Helper ultra seguro para extraer IDs sin importar cómo se llamen en localStorage
+const obtenerId = (item: any) => String(item?.productoId ?? item?.id ?? item?.producto_id ?? "").trim()
+const obtenerTalle = (item: any) => String(item?.talle ?? "").trim()
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([])
@@ -54,7 +55,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) setItems(JSON.parse(raw) as CartItem[])
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        // Aseguramos que cada item tenga la estructura correcta
+        const normalizados = Array.isArray(parsed) ? parsed.map((i: any) => ({
+          ...i,
+          productoId: i.productoId ?? i.id ?? i.producto_id ?? 1,
+          cantidad: Number(i.cantidad) || 1,
+          precioUnitario: Number(i.precioUnitario) || 0,
+          unidadMinima: Number(i.unidadMinima) || 1,
+          stockDisponible: Number(i.stockDisponible) || 99,
+        })) : []
+        setItems(normalizados)
+      }
     } catch {
       // ignore corrupted storage
     }
@@ -70,66 +83,80 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [items, hydrated])
 
-  const agregar = useCallback<CartContextValue["agregar"]>(
-    (producto, talle, cantidad, stockDisponible) => {
-      setItems((prev) => {
-        const k = keyOf(producto.id, talle)
-        const existente = prev.find((i) => keyOf(i.productoId, i.talle) === k)
-        const yaEnCarrito = existente?.cantidad ?? 0
-        // No superar el stock disponible del talle.
-        const nuevaCantidad = Math.min(yaEnCarrito + cantidad, stockDisponible)
-        if (existente) {
-          return prev.map((i) =>
-            keyOf(i.productoId, i.talle) === k
-              ? { ...i, cantidad: nuevaCantidad, stockDisponible }
-              : i,
-          )
+  const agregar = useCallback(
+    (producto: Producto, talle: Talle, cantidad: number, stockDisponible: number) => {
+      setItems((prev: CartItem[]): CartItem[] => {
+        const idStr = String(producto.id).trim()
+        const talleStr = String(talle).trim()
+
+        const index = prev.findIndex(
+          (i) => obtenerId(i) === idStr && obtenerTalle(i) === talleStr
+        )
+
+        if (index >= 0) {
+          const copia = [...prev]
+          const existente = copia[index]
+          const nuevaCantidad = Math.min(existente.cantidad + cantidad, stockDisponible)
+          copia[index] = { ...existente, cantidad: nuevaCantidad, stockDisponible }
+          return copia
         }
-        return [
-          ...prev,
-          {
-            productoId: producto.id,
-            nombre: producto.nombre,
-            imagen: producto.imagenes[0],
-            talle,
-            cantidad: Math.min(cantidad, stockDisponible),
-            precioUnitario: producto.precioMayorista,
-            unidadMinima: producto.unidadMinimaPorPedido,
-            stockDisponible,
-          },
-        ]
+
+        const nuevoItem: CartItem = {
+          productoId: producto.id,
+          nombre: producto.nombre,
+          imagen: producto.imagenes?.[0] || "/placeholder.svg",
+          talle,
+          cantidad: Math.min(cantidad, stockDisponible),
+          precioUnitario: producto.precioMayorista,
+          unidadMinima: producto.unidadMinimaPorPedido ?? 1,
+          stockDisponible,
+        }
+
+        return [...prev, nuevoItem]
       })
     },
     [],
   )
 
-  const actualizarCantidad = useCallback<CartContextValue["actualizarCantidad"]>(
-    (productoId, talle, cantidad) => {
-      setItems((prev) =>
-        prev.map((i) => {
-          if (keyOf(i.productoId, i.talle) !== keyOf(productoId, talle)) return i
-          const clamped = Math.max(1, Math.min(cantidad, i.stockDisponible))
+  const actualizarCantidad = useCallback(
+    (productoId: string | number, talle: Talle, cantidad: number) => {
+      setItems((prev: CartItem[]): CartItem[] => {
+        const idStr = String(productoId).trim()
+        const talleStr = String(talle).trim()
+
+        return prev.map((i) => {
+          const mismoId = obtenerId(i) === idStr
+          const mismoTalle = obtenerTalle(i) === talleStr
+
+          if (!mismoId || !mismoTalle) return i
+
+          const clamped = Math.max(1, Math.min(cantidad, Number(i.stockDisponible) || 99))
           return { ...i, cantidad: clamped }
-        }),
-      )
+        })
+      })
     },
     [],
   )
 
-  const quitar = useCallback<CartContextValue["quitar"]>((productoId, talle) => {
-    setItems((prev) =>
-      prev.filter((i) => keyOf(i.productoId, i.talle) !== keyOf(productoId, talle)),
-    )
+  const quitar = useCallback((productoId: string | number, talle: Talle) => {
+    setItems((prev: CartItem[]): CartItem[] => {
+      const idStr = String(productoId).trim()
+      const talleStr = String(talle).trim()
+
+      return prev.filter(
+        (i) => !(obtenerId(i) === idStr && obtenerTalle(i) === talleStr)
+      )
+    })
   }, [])
 
   const vaciar = useCallback(() => setItems([]), [])
 
   const totalItems = useMemo(
-    () => items.reduce((acc, i) => acc + i.cantidad, 0),
+    () => items.reduce((acc, i) => acc + (Number(i.cantidad) || 0), 0),
     [items],
   )
   const total = useMemo(
-    () => items.reduce((acc, i) => acc + i.cantidad * i.precioUnitario, 0),
+    () => items.reduce((acc, i) => acc + (Number(i.cantidad) || 0) * (Number(i.precioUnitario) || 0), 0),
     [items],
   )
 
