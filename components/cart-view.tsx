@@ -3,17 +3,52 @@
 import Image from "next/image"
 import Link from "next/link"
 import { useState } from "react"
+import type { ChangeEvent, InputHTMLAttributes } from "react"
 import { AlertTriangle, Loader2, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react"
 import { useCart } from "@/lib/cart-context"
 import { formatoPrecio } from "@/lib/format"
 import { mensajePedido, whatsappLink } from "@/lib/whatsapp"
+import { crearPedidoCompleto } from "@/services/PedidoService"
+
+function Campo({
+  label,
+  ...props
+}: { label: string } & InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className="block text-sm font-medium">
+      {label}
+      <input
+        {...props}
+        className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+      />
+    </label>
+  )
+}
 
 export function CartView() {
-  const { items, actualizarCantidad, quitar } = useCart()
+  const { items, actualizarCantidad, quitar, vaciar } = useCart()
+
   const [nombre, setNombre] = useState("")
   const [telefono, setTelefono] = useState("")
+  const [correo, setCorreo] = useState("")
+  const [dir, setDir] = useState({
+    calle: "",
+    numero: "",
+    pisoDepto: "",
+    barrio: "",
+    ciudad: "",
+    provincia: "",
+    codigoPostal: "",
+  })
+
   const [mpEstado, setMpEstado] = useState<"idle" | "cargando" | "error">("idle")
   const [mpMensaje, setMpMensaje] = useState<string | null>(null)
+  const [guardando, setGuardando] = useState(false)
+  const [errorPedido, setErrorPedido] = useState<string | null>(null)
+  const [pedidoOk, setPedidoOk] = useState<number | null>(null)
+
+  const campo = (k: keyof typeof dir) => (e: ChangeEvent<HTMLInputElement>) =>
+    setDir({ ...dir, [k]: e.target.value })
 
   // Validación robusta para evitar NaN
   const obtenerCantidadSegura = (cant: any) => {
@@ -29,23 +64,78 @@ export function CartView() {
 
   const totalSeguro = items.reduce((acc, i) => {
     const cant = obtenerCantidadSegura(i.cantidad)
-    return acc + (cant * i.precioUnitario)
+    return acc + cant * i.precioUnitario
   }, 0)
+
+  const correoValido = /^\S+@\S+\.\S+$/.test(correo.trim())
+  const datosCompletos =
+    nombre.trim() &&
+    telefono.trim() &&
+    correoValido &&
+    dir.calle.trim() &&
+    dir.numero.trim() &&
+    dir.barrio.trim() &&
+    dir.ciudad.trim() &&
+    dir.provincia.trim() &&
+    dir.codigoPostal.trim()
+  const puedeEnviar = cumpleMinimos && !!datosCompletos && !guardando
+
+  async function guardarPedido() {
+    setGuardando(true)
+    setErrorPedido(null)
+    try {
+      return await crearPedidoCompleto({ nombre, telefono, correo }, dir, totalSeguro)
+    } catch (e) {
+      setErrorPedido(e instanceof Error ? e.message : "No se pudo guardar el pedido")
+      return null
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  async function enviarPorWhatsApp() {
+    // Se abre antes del await para que el navegador no bloquee la ventana
+    const ventana = window.open("", "_blank")
+    const pedido = await guardarPedido()
+    if (!pedido) {
+      ventana?.close()
+      return
+    }
+    const texto =
+      `${mensajePedido(items, totalSeguro)}\n\n` +
+      `Pedido N° ${pedido.id}\n` +
+      `Cliente: ${nombre} · ${telefono} · ${correo}\n` +
+      `Envío: ${dir.calle} ${dir.numero}${dir.pisoDepto ? ` ${dir.pisoDepto}` : ""}, ` +
+      `${dir.barrio}, ${dir.ciudad}, ${dir.provincia} (CP ${dir.codigoPostal})`
+    const url = whatsappLink(texto)
+    if (ventana) ventana.location.href = url
+    else window.location.href = url
+    setPedidoOk(pedido.id)
+    vaciar()
+  }
 
   async function pagarConMercadoPago() {
     setMpEstado("cargando")
     setMpMensaje(null)
+
+    const pedido = await guardarPedido()
+    if (!pedido) {
+      setMpEstado("idle")
+      return
+    }
+
     try {
       const res = await fetch("/api/crear-preferencia", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          pedido_id: pedido.id,
           items: items.map((i) => ({
             producto_id: i.productoId,
             talle: i.talle,
             cantidad: obtenerCantidadSegura(i.cantidad),
           })),
-          cliente: { nombre, telefono },
+          cliente: { nombre, telefono, correo },
         }),
       })
       const data = await res.json()
@@ -62,6 +152,20 @@ export function CartView() {
       setMpEstado("error")
       setMpMensaje("Error de conexión. Probá enviando el pedido por WhatsApp.")
     }
+  }
+
+  if (pedidoOk) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-24 text-center">
+        <h2 className="font-heading text-xl font-bold">¡Pedido N° {pedidoOk} guardado!</h2>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Te contactamos por WhatsApp para coordinar envío y pago.
+        </p>
+        <Link href="/" className="font-heading font-bold text-brand underline">
+          Volver al catálogo
+        </Link>
+      </div>
+    )
   }
 
   if (items.length === 0) {
@@ -129,18 +233,16 @@ export function CartView() {
 
                 <div className="mt-auto flex flex-wrap items-end justify-between gap-3 pt-3">
                   <div className="inline-flex items-center rounded-lg border border-border">
-                    {/* Botón Restar */}
                     <button
                       type="button"
                       onClick={() => actualizarCantidad(i.productoId, i.talle, cantidadValida - 1)}
                       disabled={cantidadValida <= 1}
-                      className="flex size-9 items-center justify-center rounded-l-lg transition-colors hover:bg-muted disabled:opacity-40 cursor-pointer"
+                      className="flex size-9 cursor-pointer items-center justify-center rounded-l-lg transition-colors hover:bg-muted disabled:opacity-40"
                       aria-label="Restar una unidad"
                     >
                       <Minus className="size-4" />
                     </button>
-                    
-                    {/* Input manual */}
+
                     <input
                       type="number"
                       min={1}
@@ -159,12 +261,11 @@ export function CartView() {
                       aria-label={`Cantidad de ${i.nombre}`}
                     />
 
-                    {/* Botón Sumar */}
                     <button
                       type="button"
                       onClick={() => actualizarCantidad(i.productoId, i.talle, cantidadValida + 1)}
                       disabled={cantidadValida >= i.stockDisponible}
-                      className="flex size-9 items-center justify-center rounded-r-lg transition-colors hover:bg-muted disabled:opacity-40 cursor-pointer"
+                      className="flex size-9 cursor-pointer items-center justify-center rounded-r-lg transition-colors hover:bg-muted disabled:opacity-40"
                       aria-label="Sumar una unidad"
                     >
                       <Plus className="size-4" />
@@ -200,25 +301,54 @@ export function CartView() {
           </h2>
 
           <div className="space-y-2">
-            <label className="block text-sm font-medium">
-              Nombre
-              <input
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-                placeholder="Tu nombre o comercio"
-                className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Tus datos
+            </p>
+            <Campo
+              label="Nombre"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Tu nombre o comercio"
+            />
+            <Campo
+              label="Teléfono"
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              placeholder="Cód. área + número"
+              inputMode="tel"
+            />
+            <Campo
+              label="Correo"
+              type="email"
+              value={correo}
+              onChange={(e) => setCorreo(e.target.value)}
+              placeholder="tu@correo.com"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Dirección de envío
+            </p>
+            <div className="grid grid-cols-[1fr_90px] gap-2">
+              <Campo label="Calle" value={dir.calle} onChange={campo("calle")} />
+              <Campo label="Número" value={dir.numero} onChange={campo("numero")} />
+            </div>
+            <Campo
+              label="Piso / Depto (opcional)"
+              value={dir.pisoDepto}
+              onChange={campo("pisoDepto")}
+            />
+            <Campo label="Barrio" value={dir.barrio} onChange={campo("barrio")} />
+            <div className="grid grid-cols-2 gap-2">
+              <Campo label="Ciudad" value={dir.ciudad} onChange={campo("ciudad")} />
+              <Campo
+                label="Cód. postal"
+                value={dir.codigoPostal}
+                onChange={campo("codigoPostal")}
               />
-            </label>
-            <label className="block text-sm font-medium">
-              Teléfono
-              <input
-                value={telefono}
-                onChange={(e) => setTelefono(e.target.value)}
-                placeholder="Cód. área + número"
-                inputMode="tel"
-                className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"
-              />
-            </label>
+            </div>
+            <Campo label="Provincia" value={dir.provincia} onChange={campo("provincia")} />
           </div>
 
           <div className="flex items-center justify-between border-t border-border pt-4">
@@ -241,28 +371,31 @@ export function CartView() {
             <p className="rounded-lg bg-muted p-3 text-sm text-muted-foreground">{mpMensaje}</p>
           )}
 
+          {errorPedido && (
+            <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
+              {errorPedido}
+            </p>
+          )}
+
           <div className="space-y-3">
             <button
               type="button"
               onClick={pagarConMercadoPago}
-              disabled={!cumpleMinimos || mpEstado === "cargando"}
+              disabled={!puedeEnviar || mpEstado === "cargando"}
               className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#009EE3] px-6 font-heading text-base font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#008fcc] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {mpEstado === "cargando" && <Loader2 className="size-5 animate-spin" />}
               Pagar con Mercado Pago
             </button>
-            <a
-              href={cumpleMinimos ? whatsappLink(mensajePedido(items, totalSeguro)) : undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-disabled={!cumpleMinimos}
-              onClick={(e) => {
-                if (!cumpleMinimos) e.preventDefault()
-              }}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] px-6 font-heading text-base font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#1fbe5b] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            <button
+              type="button"
+              onClick={enviarPorWhatsApp}
+              disabled={!puedeEnviar}
+              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-[#25D366] px-6 font-heading text-base font-bold uppercase tracking-wide text-white transition-colors hover:bg-[#1fbe5b] disabled:cursor-not-allowed disabled:opacity-50"
             >
+              {guardando && <Loader2 className="size-5 animate-spin" />}
               Enviar pedido por WhatsApp
-            </a>
+            </button>
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
